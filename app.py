@@ -1,8 +1,12 @@
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify
 import yfinance as yf
 from scipy.signal import find_peaks
+from flask_cors import CORS
 
 app = Flask(__name__, template_folder="html")
+
+CORS(app) 
+
 
 
 def calculate_rsi(data, period=14):
@@ -90,6 +94,4 @@ def get_stock_data(symbol):
     return jsonify(response)
 
 if __name__ == '__main__':
-    # from waitress import serve
-    # serve(app, host="0.0.0.0", port=5000)
     app.run(debug=True)
