@@ -3,6 +3,7 @@ from flask import Flask, jsonify
 import yfinance as yf
 from scipy.signal import find_peaks
 from flask_cors import CORS
+import pandas as pd
 
 app = Flask(__name__, template_folder="html")
 
@@ -44,24 +45,32 @@ def calculate_support_resistance(data, levels=3, min_distance=10, current_price=
     return support_levels, resistance_levels
 
 
-@app.route('/api/stock/<string:symbol>', methods=['GET'])
-def get_stock_data(symbol):
-    stock_name = symbol
-    if not stock_name:
-        return jsonify({"error": "Please provide a stock name using the 'name' parameter."}), 400
-
-    stock = yf.Ticker(stock_name)
-    data = stock.history(period="2y", interval="1d")
+def get_stock_data(ticker):
+    stock = yf.Ticker(ticker)
     
+    # İlk olarak 2 yıllık veri çek
+    data = stock.history(period="2y", interval="1d")
+
+    # Eğer veri boş değilse en eski tarihi al
     if not data.empty:
-        oldest_date = data.index[0]  # Verinin en eski tarihi
-        two_years_ago = datetime.datetime.today() - datetime.timedelta(days=730)
+        oldest_date = data.index[0].tz_localize(None)  # Zaman dilimini kaldır
+        two_years_ago = pd.Timestamp(datetime.datetime.today() - datetime.timedelta(days=730))  
 
         if oldest_date > two_years_ago:  # 2 yıl öncesine ulaşmıyorsa tüm veriyi al
             data = stock.history(period="max", interval="1d")
     
     return data
 
+
+@app.route('/api/stock/<string:symbol>', methods=['GET'])
+def stock_data(symbol):
+    stock_name = symbol
+    if not stock_name:
+        return jsonify({"error": "Please provide a stock name using the 'name' parameter."}), 400
+
+    stock = yf.Ticker(stock_name)
+    data = get_stock_data(symbol)
+    
     if data.empty:
         return jsonify({"error": "No data found for the given stock."}), 404
 
