@@ -37,12 +37,12 @@ def calculate_support_resistance(data, current_price, min_distance=5, prominence
     resistance_levels = resistance_levels[resistance_levels >= current_price]  # Güncel fiyat ve üstündekileri al
 
     # En yakın 4 destek seviyesini seç
-    if len(support_levels) > 4:
-        support_levels = support_levels[-4:]
+    if len(support_levels) > 2:
+        support_levels = support_levels[-2:]
 
     # En yakın 4 direnç seviyesini seç
-    if len(resistance_levels) > 4:
-        resistance_levels = resistance_levels[:4]
+    if len(resistance_levels) > 2:
+        resistance_levels = resistance_levels[:2]
 
     return support_levels.tolist(), resistance_levels.tolist()
 
