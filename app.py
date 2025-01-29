@@ -22,21 +22,17 @@ def calculate_rsi(data, period=14):
 
 
 
-def calculate_support_resistance(data, levels=3, min_distance=5):
+def calculate_support_resistance(data, min_distance=5, prominence=0.5):
     lows = data['Low'].values
     highs = data['High'].values
 
-    # Destek seviyelerini bul (dip noktaları)
-    support_indices, _ = find_peaks(-lows, distance=min_distance, prominence=0.5)
-    support_levels = np.sort(lows[support_indices])
+    # En güçlü destek seviyelerini bul (dip noktaları)
+    support_indices, _ = find_peaks(-lows, distance=min_distance, prominence=prominence)
+    support_levels = np.sort(np.unique(lows[support_indices]))  # Tekrar eden seviyeleri kaldır
 
-    # Direnç seviyelerini bul (zirve noktaları)
-    resistance_indices, _ = find_peaks(highs, distance=min_distance, prominence=0.5)
-    resistance_levels = np.sort(highs[resistance_indices])[::-1]  # Büyükten küçüğe sırala
-
-    # En yakın 3 seviyeyi seç
-    support_levels = np.unique(support_levels)[:levels]
-    resistance_levels = np.unique(resistance_levels)[:levels]
+    # En güçlü direnç seviyelerini bul (zirve noktaları)
+    resistance_indices, _ = find_peaks(highs, distance=min_distance, prominence=prominence)
+    resistance_levels = np.sort(np.unique(highs[resistance_indices]))[::-1]  # Büyükten küçüğe sırala
 
     return support_levels.tolist(), resistance_levels.tolist()
 
