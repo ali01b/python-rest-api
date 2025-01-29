@@ -42,7 +42,7 @@ def calculate_support_resistance(data, current_price, min_distance=5, prominence
     # Güncel fiyatın en yakın 4 farklı direnç seviyesini seç
     resistance_levels = sorted(resistance_levels)[:3] if len(resistance_levels) > 3 else resistance_levels
 
-    return support_levels.tolist(), resistance_levels.tolist()
+    return support_levels, resistance_levels
 
 
 def get_stock_data(ticker):
