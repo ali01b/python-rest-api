@@ -78,7 +78,7 @@ def stock_data(symbol):
 
     current_price = data['Close'].iloc[-1]
 
-    support_levels, resistance_levels = calculate_support_resistance(data)
+    support_levels, resistance_levels = calculate_support_resistance(data, current_price=current_price)
 
     # Prepare RSI data
     data['RSI'] = calculate_rsi(data)
