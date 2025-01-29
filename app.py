@@ -1,3 +1,4 @@
+import datetime
 from flask import Flask, jsonify
 import yfinance as yf
 from scipy.signal import find_peaks
@@ -51,6 +52,15 @@ def get_stock_data(symbol):
 
     stock = yf.Ticker(stock_name)
     data = stock.history(period="2y", interval="1d")
+    
+    if not data.empty:
+        oldest_date = data.index[0]  # Verinin en eski tarihi
+        two_years_ago = datetime.datetime.today() - datetime.timedelta(days=730)
+
+        if oldest_date > two_years_ago:  # 2 yıl öncesine ulaşmıyorsa tüm veriyi al
+            data = stock.history(period="max", interval="1d")
+    
+    return data
 
     if data.empty:
         return jsonify({"error": "No data found for the given stock."}), 404
