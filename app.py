@@ -1,116 +1,131 @@
-import datetime
 from flask import Flask, jsonify
 import yfinance as yf
-from scipy.signal import find_peaks
-from flask_cors import CORS
 import pandas as pd
-import numpy as np
+import pandas_ta as ta
 
-app = Flask(__name__, template_folder="html")
+app = Flask(__name__)
 
-CORS(app) 
-
-
-
-def calculate_rsi(data, period=14):
-    delta = data['Close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / loss
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
-
-
-
-def calculate_support_resistance(data, current_price, min_distance=5, prominence=0.5):
-    lows = data['Low'].values
-    highs = data['High'].values
-
-    # En güçlü destek seviyelerini bul (dip noktaları)
-    support_indices, _ = find_peaks(-lows, distance=min_distance, prominence=prominence)
-    support_levels = np.unique(lows[support_indices])  # Tekrar edenleri kaldır
-    support_levels = support_levels[support_levels < current_price]  # Güncel fiyatın altındakileri al
-
-    # En güçlü direnç seviyelerini bul (zirve noktaları)
-    resistance_indices, _ = find_peaks(highs, distance=min_distance, prominence=prominence)
-    resistance_levels = np.unique(highs[resistance_indices])  # Tekrar edenleri kaldır
-    resistance_levels = resistance_levels[resistance_levels > current_price]  # Güncel fiyatın üstündekileri al
-
-    # Güncel fiyatın en yakın 3 farklı destek seviyesini seç
-    support_levels = sorted(support_levels, reverse=True)[:3] if len(support_levels) > 3 else support_levels
-
-    # Güncel fiyatın en yakın 4 farklı direnç seviyesini seç
-    resistance_levels = sorted(resistance_levels)[:3] if len(resistance_levels) > 3 else resistance_levels
-
-    return support_levels, resistance_levels
-
-
-def get_stock_data(ticker):
-    stock = yf.Ticker(ticker)
-    
-    # İlk olarak 2 yıllık veri çek
-    data = stock.history(period="2y", interval="1d")
-
-    # Eğer veri boş değilse en eski tarihi al
-    if not data.empty:
-        oldest_date = data.index[0].tz_localize(None)  # Zaman dilimini kaldır
-        two_years_ago = pd.Timestamp(datetime.datetime.today() - datetime.timedelta(days=730))  
-
-        if oldest_date > two_years_ago:  # 2 yıl öncesine ulaşmıyorsa tüm veriyi al
-            data = stock.history(period="max", interval="1d")
-    
-    return data
-
-
-@app.route('/api/stock/<string:symbol>', methods=['GET'])
-def stock_data(symbol):
-    stock_name = symbol
-    if not stock_name:
-        return jsonify({"error": "Please provide a stock name using the 'name' parameter."}), 400
-
-    stock = yf.Ticker(stock_name)
-    data = get_stock_data(symbol)
-    
-    if data.empty:
-        return jsonify({"error": "No data found for the given stock."}), 404
-
-    current_price = data['Close'].iloc[-1]
-
-    support_levels, resistance_levels = calculate_support_resistance(data, current_price=current_price)
-
-    # Prepare RSI data
-    data['RSI'] = calculate_rsi(data)
-    rsi_data = data[['RSI']].dropna()
-    rsi_with_time = [
-        {"time": str(index), "rsi": round(row['RSI'], 2)}
-        for index, row in rsi_data.iterrows()
+# 1. Fibonacci Seviyeleri
+def calculate_fibonacci_levels(data):
+    recent_data = data[-252:]
+    max_price = recent_data['high'].max()
+    min_price = recent_data['low'].min()
+    return [
+        round(min_price + (max_price - min_price) * 0.382, 2),
+        round(min_price + (max_price - min_price) * 0.5, 2),
+        round(min_price + (max_price - min_price) * 0.618, 2)
     ]
 
-    # Prepare historical data
-    historical_data = [
-        {
-            "time": str(index),
-            "open": round(row['Open'], 2),
-            "high": round(row['High'], 2),
-            "low": round(row['Low'], 2),
-            "close": round(row['Close'], 2)
+# 2. Haftalık Pivotlar
+def calculate_pivot_levels(data):
+    try:
+        weekly_data = data[-30:].resample('W', on='date').agg({
+            'high': 'max', 'low': 'min', 'close': 'last'
+        }).dropna()
+        if len(weekly_data) == 0: return {"R1": 0, "R2": 0, "S1": 0, "S2": 0}
+        pp = (weekly_data['high'] + weekly_data['low'] + weekly_data['close']) / 3
+        return {
+            "R1": round(float((2 * pp) - weekly_data['low']).iloc[-1], 2),
+            "R2": round(float(pp + (weekly_data['high'] - weekly_data['low'])).iloc[-1], 2),
+            "S1": round(float((2 * pp) - weekly_data['high']).iloc[-1], 2),
+            "S2": round(float(pp - (weekly_data['high'] - weekly_data['low'])).iloc[-1], 2)
         }
-        for index, row in data.iterrows()
-    ]
+    except: return {"R1": 0, "R2": 0, "S1": 0, "S2": 0}
 
-    # Prepare response
-    response = {
-        "symbol": stock_name,
-        "current_price": round(current_price, 2),
-        "levels": {
-            "supports": [round(level, 2) for level in support_levels],
-            "resistances": [round(level, 2) for level in resistance_levels]
-        },
-        "rsi": rsi_with_time,
-        "historical_data": historical_data
-    }
+# 3. Swing Seviyeleri
+def detect_swing_levels(data):
+    try:
+        recent_data = data[-90:].copy()
+        recent_data['high'] = recent_data['high'].round(1)
+        recent_data['low'] = recent_data['low'].round(1)
+        swing_highs = recent_data[recent_data['high'] == recent_data['high'].rolling(10, min_periods=1).max()]['high']
+        swing_lows = recent_data[recent_data['low'] == recent_data['low'].rolling(10, min_periods=1).min()]['low']
+        return {"highs": swing_highs.dropna().unique().tolist(), "lows": swing_lows.dropna().unique().tolist()}
+    except Exception as e:
+        print(f"Swing Hata: {e}")
+        return {"highs": [], "lows": []}
 
-    return jsonify(response)
+# 4. Hacim Profili
+def calculate_volume_profile(data):
+    try:
+        data['price_bins'] = (data['close'] / 0.10).round() * 0.10
+        return data.groupby('price_bins')['volume'].sum().nlargest(5).index.round(2).tolist()
+    except Exception as e:
+        print(f"Hacim Hata: {e}")
+        return []
 
-if __name__ == '__main__':
-    app.run(debug=True)
+# 5. Seviye Filtreleme (0 ve Geçersiz Değerleri Temizle)
+def filter_supports(levels, latest_price):
+    return sorted([l for l in levels if l > 0 and l < latest_price], reverse=True)[:4]
+
+def filter_resistances(levels, latest_price):
+    return sorted([l for l in levels if l > 0 and l > latest_price])[:4]
+
+@app.route('/stock/<ticker>', methods=['GET'])
+def get_stock_data(ticker):
+    try:
+        # Veri Çekme
+        stock = yf.Ticker(ticker)
+        hist = stock.history(period="5y").reset_index()
+        hist.rename(columns={
+            "Date": "date", "Open": "open", "High": "high",
+            "Low": "low", "Close": "close", "Volume": "volume"
+        }, inplace=True)
+        
+        if hist.empty: return jsonify({"error": "Veri bulunamadı"}), 404
+
+        # Göstergeler
+        vwap_data = hist.ta.vwap(high='high', low='low', close='close', volume='volume')
+        hist['vwap'] = vwap_data.iloc[:, 0].round(2)
+        hist['rsi'] = hist.ta.rsi(length=14).round(2)
+        macd = hist.ta.macd(fast=12, slow=26, signal=9)
+        hist['macd'] = macd['MACD_12_26_9'].round(2)
+        hist['macd_signal'] = macd['MACDs_12_26_9'].round(2)
+        hist['adx'] = hist.ta.adx()['ADX_14'].round(2)
+        hist['date'] = hist['date'].dt.strftime('%Y-%m-%d')
+
+        # Seviyeler
+        latest_price = round(hist['close'].iloc[-1], 2)
+        fib_levels = calculate_fibonacci_levels(hist)
+        pivot_levels = calculate_pivot_levels(hist)
+        swing_levels = detect_swing_levels(hist)
+        volume_profile = calculate_volume_profile(hist)
+        
+        # Moving Average'lar (0 Kontrollü)
+        sma_50 = hist['close'].rolling(50).mean().dropna()
+        sma_50 = round(sma_50.iloc[-1], 2) if not sma_50.empty and sma_50.iloc[-1] > 0 else None
+        sma_200 = hist['close'].rolling(200).mean().dropna()
+        sma_200 = round(sma_200.iloc[-1], 2) if not sma_200.empty and sma_200.iloc[-1] > 0 else None
+        ema_50 = hist['close'].ewm(span=50).mean().dropna()
+        ema_50 = round(ema_50.iloc[-1], 2) if not ema_50.empty and ema_50.iloc[-1] > 0 else None
+
+        # Tüm Seviyeler
+        all_supports = fib_levels + [pivot_levels["S1"], pivot_levels["S2"]] + swing_levels["lows"] + volume_profile
+        all_supports += [sma_200] if sma_200 else []
+        all_resistances = fib_levels + [pivot_levels["R1"], pivot_levels["R2"]] + swing_levels["highs"] + volume_profile
+        all_resistances += [sma_50, ema_50] if sma_50 and ema_50 else []
+
+        # Filtrele
+        supports = filter_supports(all_supports, latest_price)
+        resistances = filter_resistances(all_resistances, latest_price)
+
+        # Tarihsel Veri
+        historical_data = hist[['date', 'open', 'high', 'low', 'close', 'volume', 'rsi', 'macd', 'macd_signal', 'adx', 'vwap']]
+        historical_data = historical_data.dropna().round(2).to_dict(orient='records')
+
+        return jsonify({
+            "ticker": ticker.replace(".IS", ""),
+            "price": latest_price,
+            "supports": supports,
+            "resistances": resistances,
+            "pivot_levels": pivot_levels,
+            "indicators": {
+                "rsi": hist['rsi'].iloc[-1],
+                "macd": hist['macd'].iloc[-1],
+                "macd_signal": hist['macd_signal'].iloc[-1]
+            },
+            "historical_data": historical_data
+        })
+    except Exception as e: return jsonify({"error": str(e)}), 500
+
+if __name__ == '__main__': app.run(port=8080, debug=True)
