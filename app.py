@@ -28,21 +28,19 @@ def calculate_support_resistance(data, current_price, min_distance=5, prominence
 
     # En güçlü destek seviyelerini bul (dip noktaları)
     support_indices, _ = find_peaks(-lows, distance=min_distance, prominence=prominence)
-    support_levels = np.sort(np.unique(lows[support_indices]))
+    support_levels = np.unique(lows[support_indices])  # Tekrar edenleri kaldır
     support_levels = support_levels[support_levels < current_price]  # Güncel fiyatın altındakileri al
 
     # En güçlü direnç seviyelerini bul (zirve noktaları)
     resistance_indices, _ = find_peaks(highs, distance=min_distance, prominence=prominence)
-    resistance_levels = np.sort(np.unique(highs[resistance_indices]))[::-1]  # Büyükten küçüğe sırala
-    resistance_levels = resistance_levels[resistance_levels >= current_price]  # Güncel fiyat ve üstündekileri al
+    resistance_levels = np.unique(highs[resistance_indices])  # Tekrar edenleri kaldır
+    resistance_levels = resistance_levels[resistance_levels > current_price]  # Güncel fiyatın üstündekileri al
 
-    # En yakın 4 destek seviyesini seç
-    if len(support_levels) > 2:
-        support_levels = support_levels[-2:]
+    # Güncel fiyatın en yakın 3 farklı destek seviyesini seç
+    support_levels = sorted(support_levels, reverse=True)[:3] if len(support_levels) > 3 else support_levels
 
-    # En yakın 4 direnç seviyesini seç
-    if len(resistance_levels) > 2:
-        resistance_levels = resistance_levels[:2]
+    # Güncel fiyatın en yakın 4 farklı direnç seviyesini seç
+    resistance_levels = sorted(resistance_levels)[:3] if len(resistance_levels) > 3 else resistance_levels
 
     return support_levels.tolist(), resistance_levels.tolist()
 
