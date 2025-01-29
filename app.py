@@ -4,7 +4,6 @@ import yfinance as yf
 from scipy.signal import find_peaks
 from flask_cors import CORS
 import pandas as pd
-
 import numpy as np
 
 app = Flask(__name__, template_folder="html")
