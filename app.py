@@ -5,6 +5,8 @@ from scipy.signal import find_peaks
 from flask_cors import CORS
 import pandas as pd
 
+import numpy as np
+
 app = Flask(__name__, template_folder="html")
 
 CORS(app) 
@@ -20,29 +22,24 @@ def calculate_rsi(data, period=14):
     return rsi
 
 
-def calculate_support_resistance(data, levels=3, min_distance=10, current_price=None):
-    lows = data['Low']
-    highs = data['High']
 
-    if current_price is None:
-        current_price = data['Close'].iloc[-1]
+def calculate_support_resistance(data, levels=3, min_distance=5):
+    lows = data['Low'].values
+    highs = data['High'].values
 
-    price_range = 0.10  # %10
-    lower_bound = current_price * (1 - price_range)
-    upper_bound = current_price * (1 + price_range)
+    # Destek seviyelerini bul (dip noktaları)
+    support_indices, _ = find_peaks(-lows, distance=min_distance, prominence=0.5)
+    support_levels = np.sort(lows[support_indices])
 
-    support_indices, _ = find_peaks(-lows, distance=min_distance)
-    support_levels = lows.iloc[support_indices]
-    # Güncel fiyata yakın destek seviyelerini filtrele
-    support_levels = support_levels[(support_levels >= lower_bound) & (support_levels <= upper_bound)]
-    support_levels = support_levels.sort_values().unique()[:levels]
+    # Direnç seviyelerini bul (zirve noktaları)
+    resistance_indices, _ = find_peaks(highs, distance=min_distance, prominence=0.5)
+    resistance_levels = np.sort(highs[resistance_indices])[::-1]  # Büyükten küçüğe sırala
 
-    resistance_indices, _ = find_peaks(highs, distance=min_distance)
-    resistance_levels = highs.iloc[resistance_indices]
-    resistance_levels = resistance_levels[(resistance_levels >= lower_bound) & (resistance_levels <= upper_bound)]
-    resistance_levels = resistance_levels.sort_values(ascending=False).unique()[:levels]
+    # En yakın 3 seviyeyi seç
+    support_levels = np.unique(support_levels)[:levels]
+    resistance_levels = np.unique(resistance_levels)[:levels]
 
-    return support_levels, resistance_levels
+    return support_levels.tolist(), resistance_levels.tolist()
 
 
 def get_stock_data(ticker):
