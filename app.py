@@ -2,8 +2,12 @@ from flask import Flask, jsonify
 import yfinance as yf
 import pandas as pd
 import pandas_ta as ta
+from flask_cors import CORS
+
+
 
 app = Flask(__name__)
+CORS(app) 
 
 # 1. Fibonacci Seviyeleri
 def calculate_fibonacci_levels(data):
