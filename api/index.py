@@ -1,11 +1,26 @@
 from flask import Flask, jsonify
+import numpy as np
 import yfinance as yf
 import pandas as pd
-import pandas_ta as ta
 from flask_cors import CORS
 
 app = Flask(__name__)
 CORS(app)
+
+
+
+def compute_rsi(data, window=14):
+    delta = data.diff()
+    gain = np.where(delta > 0, delta, 0)
+    loss = np.where(delta < 0, -delta, 0)
+    
+    avg_gain = pd.Series(gain).rolling(window=window, min_periods=1).mean()
+    avg_loss = pd.Series(loss).rolling(window=window, min_periods=1).mean()
+    
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
 
 # 1. Fibonacci Seviyeleri
 def calculate_fibonacci_levels(data):
@@ -71,26 +86,56 @@ def filter_supports(levels, latest_price, data):
 def filter_resistances(levels, latest_price):
     return sorted([l for l in levels if l > 0 and l > latest_price])[:4]
 
+def ema(series, period):
+    return series.ewm(span=period, adjust=False).mean()
+
 @app.route('/stock/<ticker>', methods=['GET'])
 def get_stock_data(ticker):
     try:
         stock = yf.Ticker(ticker)
-        hist = stock.history(period="5y").reset_index()
+        
+        
+        try:
+            hist = stock.history(period="5y")
+            if hist.empty:
+                hist = stock.history(period="max")  # Eğer 5 yıllık veri yoksa, maksimum veriyi al
+        except Exception as e:
+            print(f"Hata oluştu: {e}")
+            hist = stock.history(period="max")  # Hata durumunda da maksimum veriyi al
+
+# Reset index ile tarih sütununu bağımsız hale getir
+        hist = hist.reset_index()
+        
         hist.rename(columns={
             "Date": "date", "Open": "open", "High": "high",
             "Low": "low", "Close": "close", "Volume": "volume"
         }, inplace=True)
         
-        if hist.empty:
-            return jsonify({"error": "Veri bulunamadı"}), 404
-
+    
         hist['date'] = pd.to_datetime(hist['date'])
-        hist['rsi'] = hist.ta.rsi(length=14).round(2)
-        macd = hist.ta.macd(fast=12, slow=26, signal=9)
-        hist['macd'] = macd['MACD_12_26_9'].round(2)
-        hist['macd_signal'] = macd['MACDs_12_26_9'].round(2)
-        hist['vwap'] = hist.ta.vwap(high='high', low='low', close='close', volume='volume').iloc[:, 0].round(2)
+        hist['rsi'] = compute_rsi(hist['close']).round(2)
+        hist['ema_12'] = ema(hist['close'], 12)
+        hist['ema_26'] = ema(hist['close'], 26)
+        hist['macd'] = (hist['ema_12'] - hist['ema_26']).round(2)
+        hist['macd_signal'] = ema(hist['macd'], 9).round(2)
+
+# VWAP hesaplama
+        hist['vwap'] = (hist['high'] + hist['low'] + hist['close']) / 3 * hist['volume']
+        hist['vwap'] = (hist['vwap'].cumsum() / hist['volume'].cumsum()).round(2)
+
+# Tarihi formatla
         hist['date'] = hist['date'].dt.strftime('%Y-%m-%d')
+
+# Gereksiz sütunları kaldır
+        hist.drop(columns=['ema_12', 'ema_26'], inplace=True)
+
+        # hist['date'] = pd.to_datetime(hist['date'])
+        # hist['rsi'] = hist.ta.rsi(length=14).round(2)
+        # macd = hist.ta.macd(fast=12, slow=26, signal=9)
+        # hist['macd'] = macd['MACD_12_26_9'].round(2)
+        # hist['macd_signal'] = macd['MACDs_12_26_9'].round(2)
+        # hist['vwap'] = hist.ta.vwap(high='high', low='low', close='close', volume='volume').iloc[:, 0].round(2)
+        # hist['date'] = hist['date'].dt.strftime('%Y-%m-%d')
 
         latest_price = round(hist['close'].iloc[-1], 2)
         fib_levels = calculate_fibonacci_levels(hist)
@@ -103,6 +148,10 @@ def get_stock_data(ticker):
         
         supports = filter_supports(all_supports, latest_price, hist)
         resistances = filter_resistances(all_resistances, latest_price)
+        
+        
+        if len(supports) == 0:
+            supports.append(latest_price)
 
         return jsonify({
             "ticker": ticker.replace(".IS", ""),
